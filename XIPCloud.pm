@@ -9,7 +9,7 @@ use HTTP::Request;
 use IO::Socket::SSL;
 require Exporter;
 
-our $VERSION = '0.1';
+our $VERSION = '0.1.1';
 
 @ISA = qw(Exporter);
 @EXPORT = qw();

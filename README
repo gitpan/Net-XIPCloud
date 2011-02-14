@@ -5,45 +5,35 @@ NAME
 SYNOPSIS
     use Net::XIPCloud;
 
-    # create a new XIPCloud object my $xip = Net::XIPCloud->new( username =>
-    'myusername', password => 'mypassword );
+    my $xip = Net::XIPCloud->new( username => 'myusername', password =>
+    'mypassword );
 
-    # connect to the cloud (required for all other operations)
     $xip->connect();
 
-    # list all containers $xip->ls();
+    $xip->file("somecontainer","someobject");
 
-    # list contents of a container named "mycontainer"
+    $xip->ls();
+
     $xip->ls("mycontainer");
 
-    # create a new container called "mycontainer"
     $xip->mkdir("newcontainer");
 
-    # remove a container called "somecontainer" along with its contents
     $xip->rmdir("somecontainer");
 
-    # get utilization stats for the entire account $xip->du();
+    $xip->du();
 
-    # get utilization stats for a singe container called "somecontainer"
     $xip->du("somecontainer");
 
-    # get the contents of the "someobject" object within the "somecontainer"
-    container my $data = $xip->get_value("somecontainer","someobject");
+    my $data = $xip->get_value("somecontainer","someobject");
 
-    # place contents of the "someobject" object within the "somecontainer"
-    container into "/tmp/someobject"
     $xip->get_file("somecontainer","someobject","/tmp/someobject");
 
-    # place the contents of $data into the "someobject" object within
-    "somecontainer"
     $xip->put_value("somecontainer","someobject",$data,"text/html");
 
-    # place the contents of "/tmp/someobject" into the "someobject" object
-    within "somecontainer"
     $xip->put_file("somecontainer","someobject","/tmp/someobject","text/html
     ");
 
-    # delete an object $xip->rm("somecontainer","someobject");
+    $xip->rm("somecontainer","someobject");
 
 DESCRIPTION
     This perl module creates an XIPCloud object, which allows direct
@@ -69,6 +59,9 @@ DESCRIPTION
 
     Limit and marker values may be provided (see API documentation) for
     pagination.
+
+  file("somecontainer","someobject")
+    This call returns metadata about a specific object.
 
   mkdir("somecontainer")
     This method creates a new container. It returns 1 for success and undef
