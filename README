@@ -1,0 +1,112 @@
+NAME
+    Net::XIPCloud - Perl extension for interacting with Internap's XIPCloud
+    storage platform
+
+SYNOPSIS
+    use Net::XIPCloud;
+
+    # create a new XIPCloud object my $xip = Net::XIPCloud->new( username =>
+    'myusername', password => 'mypassword );
+
+    # connect to the cloud (required for all other operations)
+    $xip->connect();
+
+    # list all containers $xip->ls();
+
+    # list contents of a container named "mycontainer"
+    $xip->ls("mycontainer");
+
+    # create a new container called "mycontainer"
+    $xip->mkdir("newcontainer");
+
+    # remove a container called "somecontainer" along with its contents
+    $xip->rmdir("somecontainer");
+
+    # get utilization stats for the entire account $xip->du();
+
+    # get utilization stats for a singe container called "somecontainer"
+    $xip->du("somecontainer");
+
+    # get the contents of the "someobject" object within the "somecontainer"
+    container my $data = $xip->get_value("somecontainer","someobject");
+
+    # place contents of the "someobject" object within the "somecontainer"
+    container into "/tmp/someobject"
+    $xip->get_file("somecontainer","someobject","/tmp/someobject");
+
+    # place the contents of $data into the "someobject" object within
+    "somecontainer"
+    $xip->put_value("somecontainer","someobject",$data,"text/html");
+
+    # place the contents of "/tmp/someobject" into the "someobject" object
+    within "somecontainer"
+    $xip->put_file("somecontainer","someobject","/tmp/someobject","text/html
+    ");
+
+    # delete an object $xip->rm("somecontainer","someobject");
+
+DESCRIPTION
+    This perl module creates an XIPCloud object, which allows direct
+    manipulation of objects and containers within Internap's XIPCloud
+    storage.
+
+    A valid XIPCloud account is required to use this module
+
+  new( username => 'username', password => 'password');
+    Returns a reference to a new XIPCloud object. This method requires
+    passing of a valid username and password.
+
+  connect()
+    Connects to XIPCloud using the username and password provids in the
+    new() call.
+
+    Method returns 1 for success and undef for failure.
+
+  ls([CONTAINER])
+    Depending on the calling arguments, this method returns the list of
+    containers or list of objects within a single container as an array
+    reference.
+
+    Limit and marker values may be provided (see API documentation) for
+    pagination.
+
+  mkdir("somecontainer")
+    This method creates a new container. It returns 1 for success and undef
+    for failure.
+
+  rmdir("somecontainer")
+    This method removes a container and its contents. It returns 1 for
+    success and undef for failure.
+
+  du([CONTAINER])
+    Depending on calling arguments, this method returns account or
+    container-level statistics as a hash reference.
+
+  get_value("somecontainer","someobject")
+    This method returns a scalar value, containing the body of the requested
+    object.
+
+  put_value("somecontainer","someobject","..data..","text/html")
+    This method places the contents of a passed scalar into the specified
+    container and object.
+
+    Content-type may be specified, but is optional. It defaults to
+    "text/plain"
+
+  get_file("somecontainer","someobject","/tmp/destfile")
+    This method places the contents of the requested object in a target
+    location of the filesystem.
+
+  put_file("somecontainer","someobject","/tmp/sourcefile","text/html")
+    This method places the contents of a specified source file into an
+    object.
+
+  rm("somecontainer","someobject")
+    This method removes an object.
+
+AUTHOR
+    Dennis Opacki, dopacki@internap.com
+
+SEE ALSO
+    perl(1).
+
