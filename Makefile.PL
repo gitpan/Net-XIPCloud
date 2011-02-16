@@ -4,4 +4,11 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     'NAME'	=> 'Net::XIPCloud',
     'VERSION_FROM' => 'XIPCloud.pm', # finds $VERSION
+    'PREREQ_PM' => {
+       'LWP::UserAgent' => '0',
+       'IO::Socket::SSL' => '0',
+       'File::stat' => '0',
+       'HTTP::Request' => '0',
+       'Data::Dumper' => '0'
+    }
 );
