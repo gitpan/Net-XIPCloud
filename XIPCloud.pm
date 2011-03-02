@@ -1,6 +1,7 @@
 package Net::XIPCloud;
 
 use strict;
+use Fcntl;
 use Data::Dumper;
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
 use File::stat;
@@ -9,7 +10,7 @@ use HTTP::Request;
 use IO::Socket::SSL;
 require Exporter;
 
-our $VERSION = '0.2';
+our $VERSION = '0.3';
 
 @ISA = qw(Exporter);
 @EXPORT = qw();
@@ -47,6 +48,8 @@ $xip->get_file("somecontainer","someobject","/tmp/someobject");
 $xip->put_value("somecontainer","someobject",$data,"text/html");
 
 $xip->put_file("somecontainer","someobject","/tmp/someobject","text/html");
+
+$xip->get_fhstream("somecontainer","someobject",*STDOUT);
 
 $xip->rm("somecontainer","someobject");
 
@@ -448,6 +451,45 @@ sub put_file() {
   }
   else {
     $self->{debug} && print "put_file: failed for [$container/$object]\n";
+  }
+  return $status;
+}
+
+=head2 get_fhstream("somecontainer","someobject",*FILE)
+
+This method takes a container, object and open file handle as arguments.
+It retrieves the object in chunks, which it writes to *FILE as they are received.
+
+=cut
+
+sub get_fhstream() {
+  my $self = shift;
+  my $container = shift;
+  my $object = shift;
+  local (*OUT) = shift;
+  my $status = undef;
+
+  return undef unless ($self->{connected} && $container && $object && *OUT);
+  return undef unless ( (O_WRONLY | O_RDWR) & fcntl (OUT, F_GETFL, my $slush));
+
+  my $ua = LWP::UserAgent->new;
+  my $req = HTTP::Request->new(GET => $self->{storage_url}.'/'.$container.'/'.$object);
+
+  $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
+  my $res = $ua->request($req,
+    sub {
+      my ($chunk,$res) = @_;
+      print OUT $chunk;
+    }
+  );
+
+  if ($res->is_success) {
+    $status = 1;
+
+    $self->{debug} && print "get_fhstream: success for [$container/$object]\n";
+  }
+  else {
+    $self->{debug} && print "get_fhstream: failed for [$container/$object]\n";
   }
   return $status;
 }

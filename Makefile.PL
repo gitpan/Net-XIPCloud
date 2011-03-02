@@ -9,6 +9,7 @@ WriteMakefile(
        'IO::Socket::SSL' => '0',
        'File::stat' => '0',
        'HTTP::Request' => '0',
-       'Data::Dumper' => '0'
+       'Data::Dumper' => '0',
+       'Fcntl' => '0'
     }
 );

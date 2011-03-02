@@ -33,6 +33,8 @@ SYNOPSIS
     $xip->put_file("somecontainer","someobject","/tmp/someobject","text/html
     ");
 
+    $xip->get_fhstream("somecontainer","someobject",*STDOUT);
+
     $xip->rm("somecontainer","someobject");
 
 DESCRIPTION
@@ -93,6 +95,11 @@ DESCRIPTION
   put_file("somecontainer","someobject","/tmp/sourcefile","text/html")
     This method places the contents of a specified source file into an
     object.
+
+  get_fhstream("somecontainer","someobject",*FILE)
+    This method takes a container, object and open file handle as arguments.
+    It retrieves the object in chunks, which it writes to *FILE as they are
+    received.
 
   rm("somecontainer","someobject")
     This method removes an object.
