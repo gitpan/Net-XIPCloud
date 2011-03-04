@@ -10,6 +10,8 @@ SYNOPSIS
 
     $xip->connect();
 
+    $xip->cp("fromcontainer","fromobject","tocontainer","toobject");
+
     $xip->file("somecontainer","someobject");
 
     $xip->ls();
@@ -64,6 +66,9 @@ DESCRIPTION
 
   file("somecontainer","someobject")
     This call returns metadata about a specific object.
+
+  cp("fromcontainer","fromobject",'tocontainer","toobject");
+    Copy the contents of one object to another
 
   mkdir("somecontainer")
     This method creates a new container. It returns 1 for success and undef

@@ -10,7 +10,7 @@ use HTTP::Request;
 use IO::Socket::SSL;
 require Exporter;
 
-our $VERSION = '0.3';
+our $VERSION = '0.4';
 
 @ISA = qw(Exporter);
 @EXPORT = qw();
@@ -26,6 +26,8 @@ use Net::XIPCloud;
 my $xip = Net::XIPCloud->new( username => 'myusername', password => 'mypassword );
 
 $xip->connect();
+
+$xip->cp("fromcontainer","fromobject","tocontainer","toobject");
 
 $xip->file("somecontainer","someobject");
 
@@ -198,6 +200,38 @@ sub file() {
     $self->{debug} && print "file: failed [$container/$object]\n";
   }
 
+  return $status;
+}
+
+=head2 cp("fromcontainer","fromobject",'tocontainer","toobject");
+
+Copy the contents of one object to another
+
+=cut
+
+sub cp() {
+  my $self = shift;
+  my $scontainer = shift;
+  my $sobject = shift;
+  my $dcontainer = shift;
+  my $dobject = shift;
+  my $status = undef;
+
+  return undef unless ($self->{connected} && $scontainer && $sobject && $dcontainer && $dobject);
+
+  my $ua = LWP::UserAgent->new;
+  my $req = HTTP::Request->new(COPY => $self->{storage_url}.'/'.$scontainer.'/'.$sobject);
+  $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
+  $req->header( 'Destination' => $dcontainer.'/'.$dobject);
+  my $res = $ua->request($req);
+
+  if ($res->is_success) {
+    $status = 1;
+    $self->{debug} && print "cp: success [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
+  }
+  else {
+    $self->{debug} && print "cp: failed [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
+  }
   return $status;
 }
 
