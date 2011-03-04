@@ -10,7 +10,7 @@ use HTTP::Request;
 use IO::Socket::SSL;
 require Exporter;
 
-our $VERSION = '0.4';
+our $VERSION = '0.5';
 
 @ISA = qw(Exporter);
 @EXPORT = qw();
@@ -28,6 +28,8 @@ my $xip = Net::XIPCloud->new( username => 'myusername', password => 'mypassword 
 $xip->connect();
 
 $xip->cp("fromcontainer","fromobject","tocontainer","toobject");
+
+$xip->mv("fromcontainer","fromobject","tocontainer","toobject");
 
 $xip->file("somecontainer","someobject");
 
@@ -219,10 +221,15 @@ sub cp() {
 
   return undef unless ($self->{connected} && $scontainer && $sobject && $dcontainer && $dobject);
 
+  my $src = $self->file($scontainer,$sobject);
+  return undef unless (ref $src eq 'HASH');
+  my $type = $src->{type};
+
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(COPY => $self->{storage_url}.'/'.$scontainer.'/'.$sobject);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
   $req->header( 'Destination' => $dcontainer.'/'.$dobject);
+  $req->header( 'Content-type' => $type);
   my $res = $ua->request($req);
 
   if ($res->is_success) {
@@ -231,6 +238,50 @@ sub cp() {
   }
   else {
     $self->{debug} && print "cp: failed [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
+  }
+  return $status;
+}
+
+=head2 mv("fromcontainer","fromobject",'tocontainer","toobject");
+
+Rename an object, clobbering any existing object
+
+=cut
+
+sub mv() {
+  my $self = shift;
+  my $scontainer = shift;
+  my $sobject = shift;
+  my $dcontainer = shift;
+  my $dobject = shift;
+  my $status = undef;
+
+  return undef unless ($self->{connected} && $scontainer && $sobject && $dcontainer && $dobject);
+  return if ( ($scontainer eq $dcontainer) && ($sobject eq $dobject));
+
+  my $src = $self->file($scontainer,$sobject);
+  return undef unless (ref $src eq 'HASH');
+  my $type = $src->{type};
+
+  my $ua = LWP::UserAgent->new;
+  my $req = HTTP::Request->new(COPY => $self->{storage_url}.'/'.$scontainer.'/'.$sobject);
+  $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
+  $req->header( 'Destination' => $dcontainer.'/'.$dobject);
+  $req->header( 'Content-type' => $type);
+  my $res = $ua->request($req);
+
+  if ($res->is_success) {
+
+    if ( $self->rm($scontainer,$sobject) ) {
+      $status = 1;
+      $self->{debug} && print "mv: success [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
+    }
+    else {
+      $self->{debug} && print "mv: failed [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
+    }
+  }
+  else {
+    $self->{debug} && print "mv: failed [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
   }
   return $status;
 }

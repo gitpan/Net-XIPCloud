@@ -12,6 +12,8 @@ SYNOPSIS
 
     $xip->cp("fromcontainer","fromobject","tocontainer","toobject");
 
+    $xip->mv("fromcontainer","fromobject","tocontainer","toobject");
+
     $xip->file("somecontainer","someobject");
 
     $xip->ls();
@@ -69,6 +71,9 @@ DESCRIPTION
 
   cp("fromcontainer","fromobject",'tocontainer","toobject");
     Copy the contents of one object to another
+
+  mv("fromcontainer","fromobject",'tocontainer","toobject");
+    Rename an object, clobbering any existing object
 
   mkdir("somecontainer")
     This method creates a new container. It returns 1 for success and undef
