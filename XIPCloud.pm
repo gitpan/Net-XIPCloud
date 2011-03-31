@@ -10,7 +10,7 @@ use HTTP::Request;
 use IO::Socket::SSL;
 require Exporter;
 
-our $VERSION = '0.5';
+our $VERSION = '0.6';
 
 @ISA = qw(Exporter);
 @EXPORT = qw();
@@ -33,11 +33,17 @@ $xip->mv("fromcontainer","fromobject","tocontainer","toobject");
 
 $xip->file("somecontainer","someobject");
 
+$xip->file("somecontainer/some/pseudo/path/to/object");
+
 $xip->ls();
 
 $xip->ls("mycontainer");
 
+$xip->ls("mycontainer/some/pseudo/path/");
+
 $xip->mkdir("newcontainer");
+
+$xip->mkdir("newcontainer/some/pseudo/path/");
 
 $xip->rmdir("somecontainer");
 
@@ -56,6 +62,8 @@ $xip->put_file("somecontainer","someobject","/tmp/someobject","text/html");
 $xip->get_fhstream("somecontainer","someobject",*STDOUT);
 
 $xip->rm("somecontainer","someobject");
+
+$xip->create_manifest("somecontainer","someobject");
 
 =head1 DESCRIPTION
 
@@ -79,9 +87,11 @@ sub new() {
 
   bless $self, $class;
 
+  # default values for API and version
   $self->{api_url} = 'https://auth.storage.santa-clara.internapcloud.net:443/';
   $self->{api_version} = 'v1.0';
 
+  # stash remaining arguments in object
   foreach my $el (keys %args) {
     $self->{$el} = $args{$el};
   }
@@ -100,13 +110,16 @@ sub connect() {
   my $self = shift;
   my $status = undef;
 
+  # prepare authentication headers
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(GET => $self->{api_url}.$self->{api_version});
   $req->header( 'X-AUTH-USER' => $self->{username} );
   $req->header( 'X-AUTH-KEY' => $self->{password} );
 
+  # dispatch request
   my $res = $ua->request($req);
 
+  # persist state on connect
   if ($res->is_success) {
     $status = 1;
     $self->{connected} = 1;
@@ -115,6 +128,8 @@ sub connect() {
 
     $self->{debug} && print "connected: token [".$self->{storage_token}."] url [".$self->{storage_url}."]\n";
   }
+
+  # fail
   else {
     $self->{debug} && print "connection failed\n";
   }
@@ -137,22 +152,41 @@ sub ls() {
   my $limit = shift;
   my $marker = shift;
   my $list = [];
+  my $path = undef;
 
+  # make sure we have an active connection
   return undef unless ($self->{connected});
 
+  # prepare LWP object for connection
   my $ua = LWP::UserAgent->new;
   my $requrl = $self->{storage_url};
+
+  # let caller specify a pseudo path
+  if ($container =~ /\//) {
+    split('/',$container); 
+    $container = shift;
+    $path = join('/',@_);
+  }
+
+  # we don't necessarily need a container
+  # ls() without one lists all the containers
   if ($container) {
     $requrl.='/'.$container;
   }
-  if ($limit || $marker) {
-    $requrl.="?limit=$limit&marker=$marker";
+
+  # handle special flags
+  if ($limit || $marker || $path) {
+    $requrl.="?limit=$limit&marker=$marker&path=$path";
   }
+
+  # prepare the request object
   my $req = HTTP::Request->new(GET => $requrl);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
 
+  # dispatch request
   my $res = $ua->request($req);
 
+  # stuff return values into our result set
   if ($res->is_success) {
     my @raw = split("\n",$res->content);
     foreach (@raw) {
@@ -162,6 +196,8 @@ sub ls() {
 
     $self->{debug} && print "ls: success - got [".scalar(@$list)."] elements\n";
   }
+
+  # failed
   else {
     undef $list;
     $self->{debug} && print "ls: failed\n";
@@ -181,25 +217,45 @@ sub file() {
   my $container = shift;
   my $object = shift;
   my $status = undef;
+  my $path = undef;
 
-  return undef unless ($self->{connected} && $container && $object);
+  # let file() be called with one or two arguments
+  if ($object) {
+    $container.='/'.$object;
+  }
 
+  # handle pseudo paths
+  if ($container =~ /\//) {
+    split('/',$container);
+    $container = shift;
+    $path = join('/',@_);
+  }
+
+  # ensure we have enough information to proceed
+  return undef unless ($self->{connected} && $container && $path);
+
+  # prepare the LWP request
   my $ua = LWP::UserAgent->new;
-  my $req = HTTP::Request->new(HEAD => $self->{storage_url}.'/'.$container.'/'.$object);
+  my $req = HTTP::Request->new(HEAD => $self->{storage_url}.'/'.$container.'/'.$path);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
 
+  # dispatch request
   my $res = $ua->request($req);
 
+  # grab subset of returned fields
+  # TODO: should be extended to handle all x- fields
   if ($res->is_success) {
     $status->{size} = $res->header("content-length");
     $status->{mtime} = $res->header("last-modified");
     $status->{md5sum} = $res->header("etag");
     $status->{type} = $res->header("content-type");
 
-    $self->{debug} && print "file: success [$container/$object]\n";
+    $self->{debug} && print "file: success [$container/$path]\n";
   }
+
+  # fail
   else {
-    $self->{debug} && print "file: failed [$container/$object]\n";
+    $self->{debug} && print "file: failed [$container/$path]\n";
   }
 
   return $status;
@@ -219,23 +275,32 @@ sub cp() {
   my $dobject = shift;
   my $status = undef;
 
+  # ensure we have enough information to continue
   return undef unless ($self->{connected} && $scontainer && $sobject && $dcontainer && $dobject);
 
+  # hold onto the content-type of the source object for later
+  # we'll need it to create the destination object
   my $src = $self->file($scontainer,$sobject);
   return undef unless (ref $src eq 'HASH');
   my $type = $src->{type};
 
+  # prepare the copy request
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(COPY => $self->{storage_url}.'/'.$scontainer.'/'.$sobject);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
   $req->header( 'Destination' => $dcontainer.'/'.$dobject);
   $req->header( 'Content-type' => $type);
+
+  # dispatch the request
   my $res = $ua->request($req);
 
+  # success
   if ($res->is_success) {
     $status = 1;
     $self->{debug} && print "cp: success [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
   }
+
+  # failed
   else {
     $self->{debug} && print "cp: failed [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
   }
@@ -256,30 +321,43 @@ sub mv() {
   my $dobject = shift;
   my $status = undef;
 
+  # ensure we have enough information to continue
   return undef unless ($self->{connected} && $scontainer && $sobject && $dcontainer && $dobject);
+
+  # exit on moving an objec to itself - bad idea with copy/delete method
   return if ( ($scontainer eq $dcontainer) && ($sobject eq $dobject));
 
+  # get the source object's content-type and save it for later
   my $src = $self->file($scontainer,$sobject);
   return undef unless (ref $src eq 'HASH');
   my $type = $src->{type};
 
+  # prepare the LWP request
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(COPY => $self->{storage_url}.'/'.$scontainer.'/'.$sobject);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
   $req->header( 'Destination' => $dcontainer.'/'.$dobject);
   $req->header( 'Content-type' => $type);
+
+  # dispatch request
   my $res = $ua->request($req);
 
+  # copy was successful
   if ($res->is_success) {
 
+    # delete the old object
     if ( $self->rm($scontainer,$sobject) ) {
       $status = 1;
       $self->{debug} && print "mv: success [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
     }
+
+    # WAT? delete of old object failed!
     else {
       $self->{debug} && print "mv: failed [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
     }
   }
+
+  # copy failed
   else {
     $self->{debug} && print "mv: failed [$scontainer/$sobject]=>[$dcontainer/$dobject]\n";
   }
@@ -296,21 +374,47 @@ sub mkdir() {
   my $self = shift;
   my $container = shift;
   my $status = undef;
+  my $path = undef;
 
-  return undef unless ($self->{connected});
-  return undef unless $container;
+  # ensure we have enough information to proceed
+  return undef unless ($self->{connected} && $container);
 
+  # handle pseudo paths
+  if ($container =~ /\//) {
+    split('/',$container); 
+    $container = shift;
+    $path = join('/',@_);
+  }
+
+  # prepare the LWP request
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(PUT => $self->{storage_url}.'/'.$container);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
   $req->header( 'Content-Length' => '0' );
+
+  # dispatch request
   my $res = $ua->request($req);
 
+  # success
   if ($res->is_success) {
-    $status = 1;
 
-    $self->{debug} && print "mkdir: success [$container]\n";
+    # create the pseudo path marker if needed
+    if ($path) {
+      $status = $self->put_value($container,$path,' ','application/directory');
+
+      # success
+      if ($status) {
+        $self->{debug} && print "mkdir: success [$container]\n";
+      }
+
+      # pseudo path failed
+      else {
+        $self->{debug} && print "mkdir: failed [$container]\n";
+      }
+    }
   }
+ 
+  # failed
   else {
     $self->{debug} && print "mkdir: failed [$container]\n";
   }
@@ -328,21 +432,37 @@ sub rmdir() {
   my $self = shift;
   my $container = shift;
   my $status = undef;
+  my $path = undef;
 
-  return undef unless ($self->{connected});
-  return undef unless $container;
+  # ensure we have enough information to continue
+  return undef unless ($self->{connected} && $container);
 
+  # handle pseudo paths
+  if ($container =~ /\//) {
+    split('/',$container); 
+    $container = shift;
+    $path = join('/',@_);
+  }
+
+  # TODO - handle recursive deletion of pseudo-folder objects
+  # wish there was a way to do this with the api
+
+  # prepare LWP request
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(DELETE => $self->{storage_url}.'/'.$container);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
   $req->header( 'Content-Length' => '0' );
+
+  # dispatch request
   my $res = $ua->request($req);
 
+  # success
   if ($res->is_success) {
     $status = 1;
- 
     $self->{debug} && print "rmdir: success [$container]\n";   
   }
+
+  # failed
   else {
     $self->{debug} && print "rmdir: failed [$container]\n";
   }
@@ -361,18 +481,27 @@ sub du() {
   my $container = shift;
   my $status = undef;
 
+  # ensure we have enough information to continue
   return undef unless ($self->{connected});
 
+  # prepare LWP reques
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(HEAD => $self->{storage_url}.($container?'/'.$container:''));
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
+
+  # dispatch request
   my $res = $ua->request($req);
 
+  # success
   if ($res->is_success) {
+
+    # return fields appropriate for container
     if ($container) {
       $status->{bytes} = $res->header('x-container-bytes-used');
       $status->{objects} = $res->header('x-container-object-count');
     }
+
+    # return global statistics
     else {
       $status->{bytes} = $res->header('x-account-bytes-used');
       $status->{objects} = $res->header('x-account-object-count');
@@ -381,6 +510,8 @@ sub du() {
 
     $self->{debug} && print "du: success\n";
   }
+
+  # failed
   else{
     $self->{debug} && print "du: failed\n";
   }
@@ -399,19 +530,27 @@ sub get_value() {
   my $object = shift;
   my $data = undef;
 
+  # ensure we have enough information to continue
   return undef unless ($self->{connected} && $container && $object);
 
+  # prepare the LWP object
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(GET => $self->{storage_url}.'/'.$container.'/'.$object);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
 
+  # dispatch request
   my $res = $ua->request($req);
 
+  # success
   if ($res->is_success) {
+
+    # stash return data
     $data = $res->content;
 
     $self->{debug} && print "get_value: success for [$container/$object]\n";
   }
+ 
+  # failed
   else {
     $self->{debug} && print "get_value: failed for [$container/$object]\n";
   }
@@ -434,25 +573,34 @@ sub put_value() {
   my $content_type = shift;
   my $status = undef;
 
+  # ensure we have enough information to continue
   return undef unless ($self->{connected} && $container && $object && $data);
 
+  # use a sane default content-type if one isn't specified
   unless ($content_type) {
-    $content_type = 'text/plain';
+    $content_type = 'application/octet-stream';
   }
 
+  # prepare the LWP request
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(PUT => $self->{storage_url}.'/'.$container.'/'.$object);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
   $req->header( 'Content-type' => $content_type);
   $req->content( $data );  
 
+  # dispatch request
   my $res = $ua->request($req);
 
+  # success
   if ($res->is_success) {
+ 
+    # stash return data
     $data = $res->content;
 
     $self->{debug} && print "put_value: success for [$container/$object]\n";
   }
+
+  # failed
   else {
     $self->{debug} && print "put_value: failed for [$container/$object]\n";
   }
@@ -472,19 +620,25 @@ sub get_file() {
   my $tmpfile = shift;
   my $status = undef;
 
+  # ensure we have enough information to continue
   return undef unless ($self->{connected} && $container && $object && $tmpfile);
 
+  # prepare the LWP request
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(GET => $self->{storage_url}.'/'.$container.'/'.$object);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
 
+  # dispatch request, specifying a location to store the data returned
   my $res = $ua->request($req,$tmpfile);
 
+  # success
   if ($res->is_success) {
     $status = 1;
 
     $self->{debug} && print "get_file: success for [$container/$object]\n";
   }
+
+  # failure
   else {
     $self->{debug} && print "get_file: failed for [$container/$object]\n";
   }
@@ -505,35 +659,55 @@ sub put_file() {
   my $content_type = shift;
   my $status = undef;
 
+  # ensure we have enough information to continue
+  # source file must exist
   return undef unless ($self->{connected} && $container && $object && (-e $srcfile) );
 
+  # use a sane default content-type when one isn't specified
   unless ($content_type) {
-    $content_type = 'text/plain';
+    $content_type = 'application/octet-stream';
   }
 
+  # get the size of the source file
   my $size = stat($srcfile)->size;
+
+  # open the file in binary mode for reading
   open(IN, $srcfile);
   binmode IN;
 
+  # create reader callback
   my $reader = sub { 
     read IN, my $buf, 65536;
     return $buf;
   };
 
+  # prepare LWP for fancy stuff
   $HTTP::Request::Common::DYNAMIC_FILE_UPLOAD = 1;
+
+  # create LWP object
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(PUT => $self->{storage_url}.'/'.$container.'/'.$object);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
   $req->header( 'Content-type' => $content_type);
   $req->header( 'Content-length' => $size );
+
+  # tell LWP to use our reader callback
   $req->content($reader);
+
+  # dispatch request
   my $res = $ua->request($req);
 
+  # close input file
+  close(IN);
+
+  # success
   if ($res->is_success) {
     $status = 1;
 
     $self->{debug} && print "put_file: success for [$container/$object]\n";
   }
+
+  # faled
   else {
     $self->{debug} && print "put_file: failed for [$container/$object]\n";
   }
@@ -554,13 +728,18 @@ sub get_fhstream() {
   local (*OUT) = shift;
   my $status = undef;
 
+  # ensure we have enough information to continue
   return undef unless ($self->{connected} && $container && $object && *OUT);
+
+  # make sure the file handle we were passed is open
   return undef unless ( (O_WRONLY | O_RDWR) & fcntl (OUT, F_GETFL, my $slush));
 
+  # prepare the LWP request
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(GET => $self->{storage_url}.'/'.$container.'/'.$object);
-
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
+
+  # create our custom handler for reading
   my $res = $ua->request($req,
     sub {
       my ($chunk,$res) = @_;
@@ -568,11 +747,14 @@ sub get_fhstream() {
     }
   );
 
+  # success
   if ($res->is_success) {
     $status = 1;
 
     $self->{debug} && print "get_fhstream: success for [$container/$object]\n";
   }
+
+  # failed
   else {
     $self->{debug} && print "get_fhstream: failed for [$container/$object]\n";
   }
@@ -591,22 +773,74 @@ sub rm() {
   my $object = shift;
   my $status = undef;
 
-  return undef unless ($self->{connected});
-  return undef unless $container && $object;
+  # ensure we have enough information to continue
+  return undef unless ($self->{connected} && $container && $object);
 
+  # prepare the LWP object
   my $ua = LWP::UserAgent->new;
   my $req = HTTP::Request->new(DELETE => $self->{storage_url}.'/'.$container.'/'.$object);
   $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
   $req->header( 'Content-Length' => '0' );
+
+  # dispatch the request
   my $res = $ua->request($req);
 
+  # success
   if ($res->is_success) {
     $status = 1;
-
     $self->{debug} && print "rm: success for [$container/$object]\n";
   }
+
+  # failed
   else {
     $self->{debug} && print "rm: failed for [$container/$object]\n";
+  }
+  return $status;
+}
+
+=head2 create_manifest("somecontainer","someobject")
+
+This method creates a manifest for large-object support
+
+=cut
+
+sub create_manifest() {
+  my $self = shift;
+  my $container = shift;
+  my $object = shift;
+  my $status = undef;
+  my $content_type = 'application/octet-stream';
+  my $data;
+
+  # ensure we have enough information to continue
+  return undef unless ($self->{connected} && $container && $object);
+
+  # prepare the LWP request
+  my $ua = LWP::UserAgent->new;
+  my $req = HTTP::Request->new(PUT => $self->{storage_url}.'/'.$container.'/'.$object);
+  $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
+  $req->header( 'Content-type' => $content_type);
+
+  # point the manifest header to ourselves
+  # segments will be further along our path:
+  # somecontainer/manifest            <- manifest
+  # somecontainer/manifest/segment1   <- segment
+  # somecontainer/manifest/segment2   <- segment
+  $req->header( 'X-Object-Manifest' => $container.'/'.$object);
+  $req->header( 'Content-Length' => '0' );
+  $req->content('');  
+
+  # dispatch request
+  my $res = $ua->request($req);
+
+  # success
+  if ($res->is_success) {
+    $self->{debug} && print "create_manifest: success for [$container/$object]\n";
+  }
+
+  # failed
+  else {
+    $self->{debug} && print "create_manifest: failed for [$container/$object]\n";
   }
   return $status;
 }

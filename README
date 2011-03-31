@@ -16,11 +16,17 @@ SYNOPSIS
 
     $xip->file("somecontainer","someobject");
 
+    $xip->file("somecontainer/some/pseudo/path/to/object");
+
     $xip->ls();
 
     $xip->ls("mycontainer");
 
+    $xip->ls("mycontainer/some/pseudo/path/");
+
     $xip->mkdir("newcontainer");
+
+    $xip->mkdir("newcontainer/some/pseudo/path/");
 
     $xip->rmdir("somecontainer");
 
@@ -40,6 +46,8 @@ SYNOPSIS
     $xip->get_fhstream("somecontainer","someobject",*STDOUT);
 
     $xip->rm("somecontainer","someobject");
+
+    $xip->create_manifest("somecontainer","someobject");
 
 DESCRIPTION
     This perl module creates an XIPCloud object, which allows direct
@@ -113,6 +121,9 @@ DESCRIPTION
 
   rm("somecontainer","someobject")
     This method removes an object.
+
+  create_manifest("somecontainer","someobject")
+    This method creates a manifest for large-object support
 
 AUTHOR
     Dennis Opacki, dopacki@internap.com
