@@ -10,7 +10,7 @@ use HTTP::Request;
 use IO::Socket::SSL;
 require Exporter;
 
-our $VERSION = '0.6';
+our $VERSION = '0.7';
 
 @ISA = qw(Exporter);
 @EXPORT = qw();
@@ -64,6 +64,16 @@ $xip->get_fhstream("somecontainer","someobject",*STDOUT);
 $xip->rm("somecontainer","someobject");
 
 $xip->create_manifest("somecontainer","someobject");
+
+$xip->chmod("somecontainer","public");
+
+$xip->cdn("somecontainer","enable","logs",300);
+
+$xip->cdn("somecontainer","disable");
+
+$xip->cdn("somecontainer");
+
+$xip->cdn();
 
 =head1 DESCRIPTION
 
@@ -125,8 +135,8 @@ sub connect() {
     $self->{connected} = 1;
     $self->{storage_token} = $res->header( 'x-storage-token' );
     $self->{storage_url} = $res->header( 'x-storage-url' );
-
-    $self->{debug} && print "connected: token [".$self->{storage_token}."] url [".$self->{storage_url}."]\n";
+    $self->{cdn_url} = $res->header( 'x-cdn-management-url' );
+    $self->{debug} && print "connected: token [".$self->{storage_token}."] url [".$self->{storage_url}."] cdn [".$self->{cdn_url}."]\n";
   }
 
   # fail
@@ -843,6 +853,209 @@ sub create_manifest() {
     $self->{debug} && print "create_manifest: failed for [$container/$object]\n";
   }
   return $status;
+}
+
+=head2 chmod("somecontainer","public")
+
+This method makes a container "public" or "private".
+
+=cut
+
+sub chmod() {
+  my $self = shift;
+  my $container = shift;
+  my $mode = shift;
+  my $status = undef;
+
+  # ensure we have enough information to continue
+  return undef unless ($self->{connected} && $container && $mode);
+
+  # fix-up mode
+  if ($mode eq 'public') {
+    $mode = '.r:*';
+  }
+  else {
+    $mode = '.r:-*';
+  }
+
+  # prepare LWP request
+  my $ua = LWP::UserAgent->new;
+  my $req = HTTP::Request->new(POST => $self->{storage_url}.'/'.$container);
+  $req->header( 'X-STORAGE-TOKEN' => $self->{storage_token} );
+  $req->header( 'X-CONTAINER-READ' => $mode );
+
+  # dispatch request
+  my $res = $ua->request($req);
+
+  # success
+  if ($res->is_success) {
+    $status = 1;
+    $self->{debug} && print "chmod: success [$container]\n";   
+  }
+
+  # failed
+  else {
+    $self->{debug} && print "chmod: failed [$container]\n";
+  }
+  return $status;
+}
+
+=head2 cdn("somecontainer","enable","true",300)
+
+This method manages a container's cdn configuration. 
+
+Called with no arguments, it returns array reference, containing 
+all cdn-enabled containers.
+
+Called with just a container name, it returns a hash reference,
+containing the cdn metadata for a container.
+
+Called with a container name and "disable", it disables the cdn
+extensions for that container.
+
+Called with a container name, "enable", logging preference and TTL,
+it configures cdn extensions for a container.
+
+=cut
+
+sub cdn() {
+  my $self = shift;
+  my $container = shift;
+  my $mode = shift;
+  my $logs = shift;
+  my $ttl = shift;
+
+  my $status = undef;
+
+  # ensure we have enough information to continue
+  return undef unless ($self->{connected});
+
+  # prepare LWP request
+  my $ua = LWP::UserAgent->new;
+
+  # handle bare call - list cdn-enabled containers
+  if ( ! $container ) {
+    my $req = HTTP::Request->new(GET => $self->{cdn_url});
+    $req->header( 'X-AUTH-TOKEN' => $self->{storage_token} );
+
+    # dispatch request
+    my $res = $ua->request($req);
+
+    # stuff return values into our result set
+    if ($res->is_success) {
+      my $list = [];
+      my @raw = split("\n",$res->content);
+      foreach (@raw) {
+        next if /^$/;
+        push @$list, $_;
+      }  
+
+      $self->{debug} && print "cdn: success\n";
+      return $list;
+    }
+    else {
+      $self->{debug} && print "cdn: failed\n";
+      return [];
+    }
+  }
+
+  # get cdn attributes for a container
+  if ( $container && !$mode) {
+    my $req = HTTP::Request->new(HEAD => $self->{cdn_url}.'/'.$container);
+    $req->header( 'X-AUTH-TOKEN' => $self->{storage_token} );
+
+    # dispatch request
+    my $res = $ua->request($req);
+
+    # stuff return values into our result set
+    if ($res->is_success) {
+      my $metadata;
+      $metadata->{ttl} = $res->header("x-ttl");
+      $metadata->{logs} = $res->header("x-log-retention");
+      $metadata->{enabled} = $res->header("x-cdn-enabled");
+      $metadata->{uri} = $res->header("x-cdn-uri");
+      $metadata->{ssluri} = $res->header("x-cdn-uri");
+      $metadata->{ssluri} =~ s/http/https/g;
+
+      $self->{debug} && print "cdn: success [$container]\n";
+      return $metadata;
+    }
+    else {
+      $self->{debug} && print "cdn: failed [$container]\n";
+      return undef;
+    }
+
+  }
+
+  # disable cdn support for a container
+  if ( $container && ( $mode eq 'disable')) {
+    my $req = HTTP::Request->new(POST => $self->{cdn_url}.'/'.$container);
+    $req->header( 'X-AUTH-TOKEN' => $self->{storage_token} );
+    $req->header( 'X-CDN-ENABLED' => 'False' );
+
+    # dispatch request
+    my $res = $ua->request($req);
+
+    # stuff return values into our result set
+    if ($res->is_success) {
+      $self->{debug} && print "cdn: success [$container] disable\n";
+      return 1;
+    }
+    else {
+      $self->{debug} && print "cdn: failed [$container] disable\n";
+      return undef;
+    }
+  }
+
+  # enable cdn on a container / update attributes
+  if ( $container && ( $mode eq 'enable')) {
+
+    my $req = HTTP::Request->new(POST => $self->{cdn_url}.'/'.$container);
+    $req->header( 'X-AUTH-TOKEN' => $self->{storage_token} );
+    $req->header( 'X-CDN-ENABLED' => 'True' );
+    $logs && $req->header( 'X-LOG-RETENTION' => $logs );
+    $ttl && $req->header( 'X-TTL' => $ttl );
+
+    # dispatch request
+    my $res = $ua->request($req);
+
+    # stuff return values into our result set
+    if ($res->is_success) {
+      my $metadata;
+      $metadata->{uri} = $res->header("x-cdn-uri");
+      $metadata->{ssluri} = $res->header("x-cdn-uri");
+      $metadata->{ssluri} =~ s/http/https/g;
+
+      $self->{debug} && print "cdn: success [$container] enable\n";
+      return $metadata;
+    }
+    else {
+      # container might not exist - try again with a PUT
+      $req = HTTP::Request->new(PUT =>  $self->{cdn_url}.'/'.$container);
+      $req->header( 'X-AUTH-TOKEN' => $self->{storage_token} );
+      $req->header( 'CONTENT-LENGTH' => 0 );
+      $req->header( 'X-CDN-ENABLED' => 'True' );
+      $logs && $req->header( 'X-LOG-RETENTION' => $logs );
+      $ttl && $req->header( 'X-TTL' => $ttl );
+
+      # dispatch request
+      my $res = $ua->request($req);
+
+      if ($res->is_success) {
+        my $metadata;
+        $metadata->{uri} = $res->header("x-cdn-uri");
+        $metadata->{ssluri} = $res->header("x-cdn-uri");
+        $metadata->{ssluri} =~ s/http/https/g;
+
+        $self->{debug} && print "cdn: success container [$container] logs [$logs] ttl [$ttl] enable\n";
+        return $metadata;
+      }
+      else {
+        $self->{debug} && print "cdn: failed [$container] logs [$logs] ttl [$ttl] enable\n";
+        return undef;
+      }
+    }
+  }
 }
 
 1;
